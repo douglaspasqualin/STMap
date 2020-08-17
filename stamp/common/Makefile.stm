@@ -1,0 +1,46 @@
+# ==============================================================================
+#
+# Makefile.stm
+#
+# ==============================================================================
+
+
+# ==============================================================================
+# Variables
+# ==============================================================================
+
+CFLAGS   += -DSTM -I$(STM)/include
+CFLAGS   += -I/home/dp.pasqualin/topomatch/include
+CPPFLAGS := $(CFLAGS)
+LDFLAGS  += -L$(STM)/lib
+LDFLAGS  += -L/home/dp.pasqualin/topomatch/lib
+LIBS     += -lstm
+
+#added Hwloc to get info of hardware topology
+LIBS     += -lhwloc
+
+#added topomatch to do thread mapping
+LIBS     += -ltopomatch
+
+# ==============================================================================
+# Rules
+# ==============================================================================
+
+.PHONY: default
+default: $(PROG)
+
+.PHONY: clean
+clean:
+	$(RM) $(OBJS) $(PROG) $(OUTPUT)
+
+$(PROG): $(OBJS)
+	$(LD) $(LDFLAGS) $^ $(LIBS) -o $(PROG)
+
+include ../common/Makefile.common
+
+
+# ==============================================================================
+#
+# End of Makefile.stm
+#
+# ==============================================================================
