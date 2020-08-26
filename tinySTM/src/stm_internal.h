@@ -35,7 +35,7 @@
 #include "utils.h"
 #include "atomic.h"
 #include "gc.h"
-#if INSTRUMENT == ONLINE
+#if SHARING_AWARE == THREAD_MAPPING
     #include <topomatch.h>
 #endif
 
@@ -50,17 +50,17 @@
 #define MODULAR                         3
 
 /* Thread bind*/
-#define SCATTER                         0
+#define LINUX_DEFAULT                   0
 #define COMPACT                         1
 #define ROUNDROBIN                      2
-#define LINUX_DEFAULT                   3
+#define SCATTER                         3
 #define EAGER_MAP                       4
 #define TOPO_MATCH                      5
 
 /* Instrumentation to get communication matrix and perform online thread mapping*/
 #define OFF                             0
-#define METHOD1                         1
-#define ONLINE                          2
+#define COLLECT_MATRIX                  1
+#define THREAD_MAPPING                  2
 
 #ifndef DESIGN
 #define DESIGN                         WRITE_BACK_ETL
@@ -369,9 +369,9 @@ typedef struct stm_tx { /* Transaction descriptor */
 #ifdef CONFLICT_TRACKING
     pthread_t thread_id; /* Thread identifier (immutable) */
 #endif /* CONFLICT_TRACKING */
-#if INSTRUMENT == METHOD1 || INSTRUMENT == ONLINE
+#if SHARING_AWARE != OFF
     int int_thread_id;
-#endif /* INSTRUMENT */
+#endif /* SHARING_AWARE */
 #if CM == CM_DELAY || CM == CM_MODULAR
     volatile stm_word_t *c_lock; /* Pointer to contented lock (cause of abort) */
 #endif /* CM == CM_DELAY || CM == CM_MODULAR */
@@ -399,17 +399,17 @@ typedef struct stm_tx { /* Transaction descriptor */
     unsigned int stat_locked_reads_failed; /* Failed reads of previous value */
 #endif /* READ_LOCKED_DATA */
 #endif /* TM_STATISTICS2 */
-#if INSTRUMENT == METHOD1 || INSTRUMENT == ONLINE    
+#if SHARING_AWARE != OFF
     int addressesSample; //counter used to sample the memory access
 #endif
-#if INSTRUMENT == ONLINE
+#if SHARING_AWARE == THREAD_MAPPING
     int totalAddresses;
 #endif
 } stm_tx_t;
 
 #define MAX_COMM_THREADS 256
 /* Control last 2 threads that have accessed a memory address */
-#if INSTRUMENT == METHOD1 || INSTRUMENT == ONLINE
+#if SHARING_AWARE != OFF
 
 #define ACCESS_TYPE_READ 0
 #define ACCESS_TYPE_WRITE 1
@@ -494,7 +494,7 @@ extern global_t _tinystm;
     static char* mapPath;
 #endif
 
-#if INSTRUMENT == METHOD1 || INSTRUMENT == ONLINE
+#if SHARING_AWARE != OFF
     
 //when get memory access, every "sampleInterval" access    
 #ifndef SAMPLE_INTERVAL
@@ -513,15 +513,12 @@ extern global_t _tinystm;
     
     static char* application_name;
     static address_entry map_access[LOCK_ARRAY_SIZE];
-//    pthread_mutex_t comm_matrix_mutex;
     static double **comm_matrix; 
    // access_type access_per_thread[MAX_COMM_THREADS];
-    //uint32_t sampleInterval; 
     static uint8_t needMapping;
-#if INSTRUMENT == ONLINE
+#if SHARING_AWARE == THREAD_MAPPING
     static pthread_t pthreads[MAX_COMM_THREADS];
     static tm_topology_t *topology;
-    //uint32_t mapping_interval;
 #endif
 #endif
 
@@ -593,9 +590,16 @@ void computeTopology() {
 #if BIND_THREAD == ROUNDROBIN
     // Check the number of cores that share each cache L2
     int global_l2_nb_cores = 0;
+#if HWLOC_VERSION_MAJOR >= 2
+    hwloc_obj_t tmp_cache_l2 = hwloc_get_obj_by_type(hwloc_topology, HWLOC_OBJ_L2CACHE, 0);
+    if (tmp_cache_l2 != NULL) {
+        global_l2_nb_cores = tmp_cache_l2->arity;
+    }
+#else    
     hwloc_obj_t tmp_cache_l2 = hwloc_get_obj_by_type(hwloc_topology, HWLOC_OBJ_CORE, 0)->parent->parent;
     if (tmp_cache_l2->type == HWLOC_OBJ_CACHE)
         global_l2_nb_cores = tmp_cache_l2->arity;    
+#endif    
     
     hwloc_obj_t base_node;
     base_node = hwloc_get_obj_by_type(hwloc_topology, HWLOC_OBJ_CORE, 0)->parent->parent;
@@ -622,21 +626,39 @@ void computeTopology() {
 //Scatter
 #if BIND_THREAD == SCATTER
     // Check if the machine has L3 caches (CORE->L1->L2->L3): Yes: 1, No: 0
+#if HWLOC_VERSION_MAJOR >= 2    
+    int global_topology_has_cache_l3 = hwloc_get_obj_by_type(hwloc_topology, HWLOC_OBJ_L3CACHE, 0) != NULL;
+#else
     int global_topology_has_cache_l3 = (hwloc_get_obj_by_type(hwloc_topology, HWLOC_OBJ_CORE, 0)->parent->parent->parent->type == HWLOC_OBJ_CACHE);
+#endif  
     if (global_topology_has_cache_l3) {
 
         // Check the number of cores that share each cache L2
         int global_l2_nb_cores = 0;
+#if HWLOC_VERSION_MAJOR >= 2
+        hwloc_obj_t tmp_cache_l2 = hwloc_get_obj_by_type(hwloc_topology, HWLOC_OBJ_L2CACHE, 0);
+        if (tmp_cache_l2 != NULL) {
+            global_l2_nb_cores = tmp_cache_l2->arity;
+        }
+#else
         hwloc_obj_t tmp_cache_l2 = hwloc_get_obj_by_type(hwloc_topology, HWLOC_OBJ_CORE, 0)->parent->parent;
         if (tmp_cache_l2->type == HWLOC_OBJ_CACHE)
             global_l2_nb_cores = tmp_cache_l2->arity;
+#endif   
 
 
         // Check the number of caches L2 that share each cache L3
         int global_l3_nb_l2 = 0;
+#if HWLOC_VERSION_MAJOR >= 2
+        hwloc_obj_t tmp_cache_l3 = hwloc_get_obj_by_type(hwloc_topology, HWLOC_OBJ_L3CACHE, 0);
+        if (tmp_cache_l3 != NULL) {
+            global_l3_nb_l2 = tmp_cache_l3->arity;
+        }
+#else
         hwloc_obj_t tmp_cache_l3 = hwloc_get_obj_by_type(hwloc_topology, HWLOC_OBJ_CORE, 0)->parent->parent->parent;
         if (tmp_cache_l3->type == HWLOC_OBJ_CACHE)
-            global_l3_nb_l2 = tmp_cache_l3->arity;   
+            global_l3_nb_l2 = tmp_cache_l3->arity;       
+#endif         
         
         int cores_pinned = 0;
         int current_l2_base = 0;
@@ -672,7 +694,7 @@ void computeTopology() {
 }
 #endif
 
-#if INSTRUMENT == ONLINE
+#if SHARING_AWARE == THREAD_MAPPING
 
 static inline unsigned long
 get_total_addr_hash_table() {
@@ -722,6 +744,7 @@ do_thread_mapping() {
     int i;
 
     aff_mat = tm_build_affinity_mat(comm_matrix, _tinystm.total_threads);
+   // aff_mat = tm_load_aff_mat("/home/dp.pasqualin/PhDRepo/02.OnlineThreadMapping/stamp/intruder/intruder_32.mat");
     sol = tm_compute_mapping(topology, aff_mat, NULL, NULL);
 
     //Pin threads, do the magic
@@ -736,7 +759,7 @@ do_thread_mapping() {
 }
 #endif
 
-#if INSTRUMENT == METHOD1 || INSTRUMENT == ONLINE
+#if SHARING_AWARE != OFF
 
 static inline
 address_entry* getNewAddEntry(unsigned long int mem_block) {
@@ -803,8 +826,6 @@ do_check_comm(volatile stm_word_t *addr, stm_tx_t *tx) {
        } else {
            _tinystm.access_per_thread[tx->int_thread_id].write++;
        } */
-    //    pthread_mutex_lock(&_tinystm.comm_matrix_mutex);
-
         address_entry *elem = getAddrEntry(addr);
         int shares = count_sharers(elem);
         int threadId = tx->int_thread_id;
@@ -835,7 +856,6 @@ do_check_comm(volatile stm_word_t *addr, stm_tx_t *tx) {
                 }
                 break;
         }
-    //  pthread_mutex_unlock(&_tinystm.comm_matrix_mutex);
 }
 
 static inline void
@@ -846,7 +866,7 @@ check_comm(volatile stm_word_t *addr, stm_tx_t *tx, int access_type) {
             tx->addressesSample = 0;
             do_check_comm(addr, tx);
         }
-#if INSTRUMENT == ONLINE
+#if SHARING_AWARE == THREAD_MAPPING
         if (tx->int_thread_id == THREAD_TO_INSTRUMENT) {
             tx->totalAddresses++;
         }
@@ -866,7 +886,7 @@ check_comm(volatile stm_word_t *addr, stm_tx_t *tx, int access_type) {
 }
 #endif
 
-#if INSTRUMENT == METHOD1
+#if SHARING_AWARE == COLLECT_MATRIX
 
 static inline int
 fileExists(const char *fname) {
@@ -997,11 +1017,7 @@ stm_quiesce_init(void) {
     _tinystm.quiesce = 0;
     _tinystm.threads_nb = 0;
     _tinystm.threads = NULL;
-#if INSTRUMENT == METHOD1 || INSTRUMENT == ONLINE
- /*   if (pthread_mutex_init(&comm_matrix_mutex, NULL) != 0) {
-        fprintf(stderr, "Error creating mutex comm_matrix\n");
-        exit(1);
-    } */
+#if SHARING_AWARE != OFF
     needMapping = 1;
     memset(map_access, 0, sizeof (map_access));
     comm_matrix = (double **) malloc(_tinystm.total_threads * sizeof(double**));
@@ -1010,7 +1026,7 @@ stm_quiesce_init(void) {
         comm_matrix[i] = (double*) malloc(_tinystm.total_threads * sizeof(double));
         memset(comm_matrix[i], 0, sizeof(double) * _tinystm.total_threads );
     }
-#if INSTRUMENT == ONLINE
+#if SHARING_AWARE == THREAD_MAPPING
     tm_set_exhaustive_search_flag(0);
     tm_set_greedy_flag(0);
     /* Use physical core numbers */
@@ -1086,11 +1102,10 @@ stm_quiesce_exit(void) {
 
     pthread_cond_destroy(&_tinystm.quiesce_cond);
     pthread_mutex_destroy(&_tinystm.quiesce_mutex);
-#if INSTRUMENT == METHOD1
+#if SHARING_AWARE == COLLECT_MATRIX
     print_instrumentation_data(&comm_matrix);
-//    pthread_mutex_destroy(&_tinystm.comm_matrix_mutex);
 #endif
-#if INSTRUMENT == ONLINE
+#if SHARING_AWARE == THREAD_MAPPING
     tm_free_topology(topology);
     printf("#M\t%s\t%d\t%u\n", application_name, _tinystm.total_threads, (unsigned int) needMapping);
 #endif    
@@ -1693,7 +1708,7 @@ stm_write(stm_tx_t *tx, volatile stm_word_t *addr, stm_word_t value, stm_word_t 
     PRINT_DEBUG2("==> stm_write(t=%p[%lu-%lu],a=%p,d=%p-%lu,m=0x%lx)\n",
             tx, (unsigned long) tx->start, (unsigned long) tx->end, addr, (void *) value, (unsigned long) value, (unsigned long) mask);
 
-#if INSTRUMENT == METHOD1 || INSTRUMENT == ONLINE
+#if SHARING_AWARE != OFF
     check_comm(addr, tx, ACCESS_TYPE_WRITE);
 #endif  
 
@@ -1838,11 +1853,11 @@ int_stm_init_thread(int threadId) {
     /* Thread identifier */
     tx->thread_id = pthread_self();
 #endif /* CONFLICT_TRACKING */
-#if INSTRUMENT == METHOD1 || INSTRUMENT == ONLINE
+#if SHARING_AWARE != OFF
     tx->int_thread_id = threadId;
     tx->addressesSample = 0;
 #endif
-#if INSTRUMENT == ONLINE
+#if SHARING_AWARE == THREAD_MAPPING
     tx->totalAddresses = 0;
     pthreads[threadId] = pthread_self();
 #endif
@@ -1921,7 +1936,7 @@ int_stm_exit_thread(stm_tx_t *tx) {
         double avg_aborts = .0;
         if (tx->stat_commits)
             avg_aborts = (double) tx->stat_aborts / tx->stat_commits;
-#if INSTRUMENT == METHOD1 || INSTRUMENT == ONLINE
+#if SHARING_AWARE != OFF
         printf("Thread %d | commits:%12u aborts:%12u avg_aborts:%12.2f max_retries:%12u\n", tx->int_thread_id, tx->stat_commits, tx->stat_aborts, avg_aborts, tx->stat_retries_max);
 #else
         printf("Thread %p | commits:%12u avg_aborts:%12.2f max_retries:%12u\n", (void *) pthread_self(), tx->stat_commits, avg_aborts, tx->stat_retries_max);
@@ -2071,7 +2086,7 @@ end:
 
 static INLINE stm_word_t
 int_stm_load(stm_tx_t *tx, volatile stm_word_t *addr) {
-#if INSTRUMENT == METHOD1 || INSTRUMENT == ONLINE
+#if SHARING_AWARE != OFF
     check_comm(addr, tx, ACCESS_TYPE_READ);
 #endif    
 #if DESIGN == WRITE_BACK_ETL

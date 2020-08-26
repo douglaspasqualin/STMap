@@ -20,32 +20,83 @@ include Makefile.common
 #   Memory.  Proceedings of the 13th ACM SIGPLAN Symposium on Principles
 #   and Practice of Parallel Programming (PPoPP), 2008.
 #######################################################################
+
 DEFINES += -D_GNU_SOURCE
 
-ifdef INSTRUMENT
-    DEFINES += $(INSTRUMENT)
+########################################################################
+# Define the kind of sharing-aware mapping strategy
+#
+# OFF: Disable sharing-aware thread mapping, i.e., do not keep track of
+#   memory address and do not perform dynamic thread mapping
+#
+# COLLECT_MATRIX: keep tracking of accessed memory addresses, creating
+#   a communication (or sharing) matrix. This matrix is saved in .csv
+#   format in the end of the execution. Using the SAMPLE_INTERVAL
+#   to define the granularity of the tracking. A SAMPLE_INTERVAL of zero
+#   will keep track of all memory addresses accessed by the STM runtime
+#
+# THREAD_MAPPING: Dynamically collect the communication matrix of the
+#   running application and perform the thread mapping on each
+#   MAPPING_INTERVAL. It depends on TopoMatch library.
+#   For more details refer to:
+#
+# Douglas Pasqualin, Matthias Diener, Andre Du Bois and Mauricio Pilla.
+#   Online Sharing-Aware Thread Mapping in Software Transactional Memory.
+#   Proceedings of the IEEE 32nd International Symposium on Computer
+#   Architecture and High Performance Computing (SBAC-PAD), 2020.
+########################################################################
+ifdef SHARING_AWARE
+    DEFINES += $(SHARING_AWARE)
 else
-    #DEFINES += -DINSTRUMENT=OFF
-    DEFINES += -DINSTRUMENT=METHOD1
-    #DEFINES += -DINSTRUMENT=ONLINE
+    #DEFINES += -DSHARING_AWARE=OFF
+    DEFINES += -DSHARING_AWARE=COLLECT_MATRIX
+    #DEFINES += -DSHARING_AWARE=THREAD_MAPPING
 endif
 
+########################################################################
+# Define the kind of thread bind strategy
+#
+# LINUX_DEFAULT: The default OS scheduler.
+#
+# SCATTER: Distributes threads across different processors,
+#   avoiding cache sharing, thus, reducing memory contention.
+#
+# COMPACT: places threads on sibling cores that share all cache levels,
+#   thus potentially reducing the data access latency if neighboring
+#   threads communicate.
+# 
+# ROUNDROBIN: is a mix between compact and scatter, where only the
+#   last level of cache is shared.
+#
+# EAGER_MAP: For static thread mapping. Define in the environment
+#   variable THREAD_MAPPING_PATH the path for the file eagermap.txt
+#   where the thread mapping (one folder by thread) is stored.
+#   Example in xxx.sh
+#
+# TOPO_MATCH: Same as EAGER_MAP. However, it looks for the file
+#   topo.txt
+#
+# For more details to static thread mapping refer to:
+#
+# Douglas Pasqualin, Matthias Diener, Andre Du Bois and Mauricio Pilla.
+#   Thread Affinity in Software Transactional Memory.
+#   Proceedings of the 19th International Symposium on Parallel and
+#   Distributed Computing (ISPDC), 2020
+########################################################################
 ifdef BIND_THREAD
 	DEFINES += $(BIND_THREAD)
 else
+	DEFINES += -DBIND_THREAD=LINUX_DEFAULT
 	#DEFINES += -DBIND_THREAD=SCATTER
 	#DEFINES += -DBIND_THREAD=COMPACT
 	#DEFINES += -DBIND_THREAD=ROUNDROBIN
 	#DEFINES += -DBIND_THREAD=EAGER_MAP
 	#DEFINES += -DBIND_THREAD=TOPO_MATCH
-	DEFINES += -DBIND_THREAD=LINUX_DEFAULT
 endif
-
-#Overhide default params in stm_internal.h
 
 #DEFINES += -DSAMPLE_INTERVAL=100
 #DEFINES += -DMAPPING_INTERVAL=50000
-#DEFINES += -DTHREAD_TO_INSTRUMENT=0
+#DEFINES += -DTHREAD_TO_INSTRUMENT=1
 
 ########################################################################
 # Three different designs can be chosen from, which differ in when locks
@@ -302,17 +353,17 @@ D := $(D:CM_DELAY=1)
 D := $(D:CM_BACKOFF=2)
 D := $(D:CM_MODULAR=3)
 D += -DCM_SUICIDE=0 -DCM_DELAY=1 -DCM_BACKOFF=2 -DCM_MODULAR=3
-D := $(D:INTERCHANGE=0)
-D := $(D:SEQUENTIAL=1)
-D := $(D:RANDOM=2)
-D := $(D:LINUX_DEFAULT=3)
+D := $(D:LINUX_DEFAULT=0)
+D := $(D:COMPACT=1)
+D := $(D:ROUNDROBIN=2)
+D := $(D:SCATTER=3)
 D := $(D:EAGER_MAP=4)
 D := $(D:TOPO_MATCH=5)
-D += -DSCATTER=0 -DCOMPACT=1 -ROUNDROBIN=2 -DLINUX_DEFAULT=3 -DEAGER_MAP=4 -DTOPO_MATCH=5
+D += -DLINUX_DEFAULT=0 -DCOMPACT=1 -DROUNDROBIN=2 -DSCATTER=3 -DEAGER_MAP=4 -DTOPO_MATCH=5
 D := $(D:OFF=0)
-D := $(D:METHOD1=1)
-D := $(D:METHOD2=2)
-D += -DOFF=0 -DMETHOD1=1 -DONLINE=2
+D := $(D:COLLECT_MATRIX=1)
+D := $(D:THREAD_MAPPING=2)
+D += -DOFF=0 -DCOLLECT_MATRIX=1 -DTHREAD_MAPPING=2
 
 ifneq (,$(findstring -DEPOCH_GC,$(DEFINES)))
   GC := $(SRCDIR)/gc.o

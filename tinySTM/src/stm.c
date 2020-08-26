@@ -273,7 +273,7 @@ stm_init(int totalThreads, char* appName)
 #endif /* EPOCH_GC */
 
   _tinystm.total_threads = totalThreads;
-#if INSTRUMENT == METHOD1 || INSTRUMENT == ONLINE
+#if SHARING_AWARE != OFF
     application_name = appName;
 #endif    
 
