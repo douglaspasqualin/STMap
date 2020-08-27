@@ -31,7 +31,7 @@ DEFINES += -D_GNU_SOURCE
 #
 # COLLECT_MATRIX: keep tracking of accessed memory addresses, creating
 #   a communication (or sharing) matrix. This matrix is saved in .csv
-#   format in the end of the execution. Using the SAMPLE_INTERVAL
+#   format in the end of the execution. Use the SAMPLE_INTERVAL
 #   to define the granularity of the tracking. A SAMPLE_INTERVAL of zero
 #   will keep track of all memory addresses accessed by the STM runtime
 #
@@ -52,6 +52,11 @@ else
     DEFINES += -DSHARING_AWARE=COLLECT_MATRIX
     #DEFINES += -DSHARING_AWARE=THREAD_MAPPING
 endif
+
+
+#DEFINES += -DSAMPLE_INTERVAL=100
+#DEFINES += -DMAPPING_INTERVAL=50000
+#DEFINES += -DTHREAD_TO_INSTRUMENT=1
 
 ########################################################################
 # Define the kind of thread bind strategy
@@ -93,10 +98,6 @@ else
 	#DEFINES += -DBIND_THREAD=EAGER_MAP
 	#DEFINES += -DBIND_THREAD=TOPO_MATCH
 endif
-
-#DEFINES += -DSAMPLE_INTERVAL=100
-#DEFINES += -DMAPPING_INTERVAL=50000
-#DEFINES += -DTHREAD_TO_INSTRUMENT=1
 
 ########################################################################
 # Three different designs can be chosen from, which differ in when locks
