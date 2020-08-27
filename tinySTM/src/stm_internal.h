@@ -36,7 +36,7 @@
 #include "atomic.h"
 #include "gc.h"
 #if SHARING_AWARE == THREAD_MAPPING
-    #include <topomatch.h>
+//    #include <topomatch.h>
 #endif
 
 /* ################################################################### *

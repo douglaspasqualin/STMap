@@ -20,7 +20,7 @@ LIBS     += -lstm
 LIBS     += -lhwloc
 
 #added topomatch to do thread mapping
-LIBS     += -ltopomatch
+#LIBS     += -ltopomatch
 
 # ==============================================================================
 # Rules
