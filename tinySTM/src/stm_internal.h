@@ -421,7 +421,8 @@ typedef struct address_entry_t {
     volatile unsigned long int address;
     unsigned int share1;
     unsigned int share2;
-    struct address_entry_t* next;
+    //Possible segmentation fault problems
+    //struct address_entry_t* next;
 } address_entry;
 
 typedef struct {
@@ -762,42 +763,16 @@ do_thread_mapping() {
 #if SHARING_AWARE != OFF
 
 static inline
-address_entry* getNewAddEntry(unsigned long int mem_block) {
-    address_entry* newEntry = malloc(sizeof (address_entry));
-    newEntry->address = mem_block;
-    newEntry->share1 = -1;
-    newEntry->share2 = -1;
-    newEntry->next = NULL;
-    return newEntry;
-}
-
-static inline
 address_entry* getAddrEntry(volatile stm_word_t *addr) {
     unsigned long int address = (stm_word_t) addr; //>> CACHE_BLOCK_BITS;
     address_entry *elem = GET_ADDR_SHARE(address);
-   
-    if (elem->address == 0) {
+    
+    if (elem->address != address) {
         elem->address = address;
         elem->share1 = -1;
-        elem->share2 = -1;
-        elem->next = NULL;
-        return elem;
+        elem->share2 = -1;        
     }
-    address_entry *temp = elem;
-    while (temp != NULL) {
-        if (temp->address == address) {
-            return temp;
-        }
-        temp = temp->next;
-    }
-    address_entry* newEntry = getNewAddEntry(address);
-    /* If conflict, insert new on the end */
-    temp = elem;
-    while (temp->next != NULL) {
-        temp = temp->next;
-    }    
-    temp->next = newEntry;
-    return newEntry;
+    return elem;
 }
 
 static inline int
@@ -932,11 +907,12 @@ print_instrumentation_data() {
     total_addr = 0;
     for (i = 0; i < LOCK_ARRAY_SIZE; i++) {
         if (map_access[i].address != 0) {
-            address_entry *temp = &map_access[i];
+            /*address_entry *temp = &map_access[i];
             while (temp != NULL) {
                 total_addr++;
                 temp = temp->next;
-            }
+            } */
+            total_addr++;
         }
     }
     printf("#Distinct addresses accessed: %lu \n", total_addr);
